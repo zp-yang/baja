@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
 import pytest
-from jax_ekfukf import ExtendedKalmanFilter, GaussianState, lti_disc
+from baja import ExtendedKalmanFilter, GaussianState, lti_disc
 
 def test_ekf_sine_demo():
     # Setup the same scenario as ekf_sine_demo.m

@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 import pytest
 
-from jax_ekfukf.pf import ParticleFilter, ParticleState
+from baja.pf import ParticleFilter, ParticleState
 
 def test_pf_ungm():
     """

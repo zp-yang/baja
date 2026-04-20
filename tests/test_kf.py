@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
 import pytest
-from jax_ekfukf import KalmanFilter, GaussianState, lti_disc
+from baja import KalmanFilter, GaussianState, lti_disc
 
 def test_kf_sine_demo():
     # Setup the same scenario as kf_sine_demo.m

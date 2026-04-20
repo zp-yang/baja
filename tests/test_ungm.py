@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 import equinox as eqx
 import pytest
-from jax_ekfukf import (
+from baja import (
     ExtendedKalmanFilter, 
     UnscentedKalmanFilter, 
     CubatureKalmanFilter, 

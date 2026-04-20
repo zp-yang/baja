@@ -1,0 +1,10 @@
+*.egg-info/
+eggs/
+.eggs/
+
+__pycache__/
+.venv
+build/
+uv.lock
+.ruff_cache/
+.vscode/

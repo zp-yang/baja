@@ -2,10 +2,10 @@ import jax
 import jax.numpy as jnp
 import pytest
 
-from jax_ekfukf.kf import KalmanFilter
-from jax_ekfukf.imm import IMMFilter, IMMState
-from jax_ekfukf.base import GaussianState
-from jax_ekfukf.utils import lti_disc
+from baja.kf import KalmanFilter
+from baja.imm import IMMFilter, IMMState
+from baja.base import GaussianState
+from baja.utils import lti_disc
 
 def test_imm_demo():
     """

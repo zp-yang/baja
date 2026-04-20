@@ -2,8 +2,8 @@ import jax
 import jax.numpy as jnp
 import pytest
 
-from jax_ekfukf.pff import EDHFilter, LEDHKNNFilter
-from jax_ekfukf.pf import ParticleState
+from baja.pff import EDHFilter, LEDHKNNFilter
+from baja.pf import ParticleState
 
 def test_pff_linear():
     """

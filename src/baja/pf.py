@@ -165,6 +165,7 @@ class ParticleFilter(AbstractFilter):
         sum_exp_w = jnp.sum(exp_w)
         
         normalized_weights = exp_w / sum_exp_w
+        # normalized_weights = jax.nn.softmax(log_posterior_weights)
         
         # Likelihood of the measurement p(y_k | Y_{k-1})
         # This is the sum of the unnormalized weights (in linear space)
