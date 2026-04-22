@@ -28,7 +28,7 @@ from .ukf import UnscentedKalmanFilter
 from .ckf import CubatureKalmanFilter
 from .ghkf import GaussHermiteKalmanFilter
 from .imm import IMMState, IMMFilter
-from .pff import EDHFilter, LEDHKNNFilter, LEDHKDEFilter, LEDHGMMFilter
+from .pff import EDHFilter
 from .pf import ParticleState, ParticleFilter
 from .utils import lti_disc, rk4
 from .transforms import compute_ut_weights, generate_sigmas, unscented_transform
@@ -46,9 +46,6 @@ __all__ = [
     "ParticleState",
     "ParticleFilter",
     "EDHFilter",
-    "LEDHKNNFilter",
-    "LEDHKDEFilter",
-    "LEDHGMMFilter",
     "lti_disc",
     "rk4",
     "compute_ut_weights",
