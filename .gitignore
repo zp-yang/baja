@@ -8,3 +8,4 @@ build/
 uv.lock
 .ruff_cache/
 .vscode/
+tmp/

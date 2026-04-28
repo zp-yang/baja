@@ -1,6 +1,9 @@
-# JAX EKF/UKF Toolbox
-
-A modern, highly-performant Python library for linear and nonlinear Kalman filtering and smoothing. This library is a complete port and reimagining of the classic MATLAB `ekfukf` toolbox, rewritten from the ground up using [JAX](https://github.com/google/jax) and [Equinox](https://github.com/patrick-kidger/equinox).
+# (BA)yesian filter in (JA)X
+---
+## ⚠️⚠️⚠️Caustion: Vibe coded ekfukf translation, verify before use⚠️⚠️⚠️
+## ⚠️ Work-in-Progress ⚠️
+---
+A modern, highly-performant Python library for linear and nonlinear Kalman filtering and smoothing. This library is a complete port and reimagining of the classic MATLAB [`ekfukf`](https://github.com/EEA-sensors/ekfukf) toolbox, rewritten from the ground up using [JAX](https://github.com/google/jax) and [Equinox](https://github.com/patrick-kidger/equinox).
 
 By leveraging JAX, this library supports:
 * **JIT Compilation (`jax.jit`)**: Filters and smoothers are blazing fast and compile down to XLA.
@@ -129,18 +132,17 @@ final_state, hist_pred, hist_upd = pf.filter_sequence(init_state, Y)
 ```
 *Note: Particle smoothing (`smooth_sequence`) is highly computationally expensive and is not currently implemented. `ParticleFilter.smooth_sequence()` will raise a `NotImplementedError`.*
 
-## Particle Flow Filters (EDH & LEDH)
+## Particle Flow Filters (EDH & LEDH) (WIP)
 Particle Flow Filters seamlessly migrate particles from the prior distribution to the posterior distribution by integrating an Ordinary Differential Equation (ODE), avoiding the need for weight-based resampling entirely.
 
 The **Exact Daum-Huang (EDH)** filter assumes a global Gaussian prior to compute the continuous flow ODE. However, highly non-Gaussian or multi-modal priors cause EDH to diverge. 
 
-To resolve this, the **Localized Exact Daum-Huang (LEDH)** filter estimates unique local covariance matrices for every particle. The library includes three localization variants:
-1. `LEDHKNNFilter`: Uses K-Nearest Neighbors (fastest, most robust for JAX `lax.scan`).
-2. `LEDHKDEFilter`: Uses Gaussian Kernel Density Estimation (KDE) with a configurable bandwidth $h$.
-3. `LEDHGMMFilter`: Uses Gaussian Mixture Models (Hard-EM/K-Means) to group particles into $M$ components.
+To resolve this, the **Localized Exact Daum-Huang (LEDH)** filter estimates unique local covariance matrices for every particle. 
+
+
 
 ```python
-from jax_ekfukf import EDHFilter, LEDHKNNFilter, ParticleState
+from jax_ekfukf import EDHFilter, ParticleState
 
 num_particles = 200
 
@@ -154,13 +156,4 @@ edh = EDHFilter(
     flow_steps=20 # ODE integration steps
 )
 
-# 2. The Localized LEDH Filters (choose your localization strategy)
-from jax_ekfukf import LEDHKNNFilter, LEDHKDEFilter, LEDHGMMFilter
-
-ledh_knn = LEDHKNNFilter(f=f, h=h, num_particles=N, Q=Q, R=R, knn_fraction=0.1)
-ledh_kde = LEDHKDEFilter(f=f, h=h, num_particles=N, Q=Q, R=R, bandwidth=2.0)
-ledh_gmm = LEDHGMMFilter(f=f, h=h, num_particles=N, Q=Q, R=R, num_components=3)
-
-# Usage is identical to the standard Particle Filter:
-final_state, hist_pred, hist_upd = ledh_knn.filter_sequence(init_state, Y)
 ```

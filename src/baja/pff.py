@@ -3,8 +3,10 @@ import jax.numpy as jnp
 import equinox as eqx
 from typing import Callable, Optional, Any, Tuple
 
-from .base import AbstractFilter
+from .base import AbstractFilter, GaussianState
 from .pf import ParticleState
+from .ekf import ExtendedKalmanFilter
+from dataclasses import dataclass
 
 
 class EDHFilter(AbstractFilter):
@@ -163,6 +165,18 @@ class EDHFilter(AbstractFilter):
         raise NotImplementedError("Particle smoothing is not supported.")
 
 
+@dataclass
+class PFPFParam(eqx.Module):
+    """
+    Holds the internal state of PFPF filters
+    EKF/UKF predict and update are apply before and after homotopy flow
+    means are the particles (n_state) or (n_particles, n_state),
+    covs are per particle (n_state, n_state) or (n_particles, n_state, n_state)
+    """
+
+    internal_state: GaussianState
+
+
 class IEDHFilter(AbstractFilter):
     """
     Particle flow filter with invertible flow, built on EDH.
@@ -175,6 +189,7 @@ class IEDHFilter(AbstractFilter):
 
     f: Callable
     h: Callable
+    internal_filter: AbstractFilter
     Q: Optional[jax.Array] = None
     R: Optional[jax.Array] = None
     num_particles: int = eqx.field(static=True)
@@ -184,6 +199,7 @@ class IEDHFilter(AbstractFilter):
         self,
         f: Callable,
         h: Callable,
+        internal_filter: AbstractFilter,
         num_particles: int,
         Q: Optional[jax.Array] = None,
         R: Optional[jax.Array] = None,
@@ -195,6 +211,7 @@ class IEDHFilter(AbstractFilter):
         self.R = jnp.asarray(R) if R is not None else None
         self.num_particles = num_particles
         self.flow_steps = flow_steps
+        self.internal_filter = internal_filter
 
     def _compute_covariances(self, particles: jnp.ndarray) -> jnp.ndarray:
         """
@@ -213,7 +230,7 @@ class IEDHFilter(AbstractFilter):
         state: ParticleState,
         z: jax.Array,
         u: Optional[jax.Array] = None,
-        params: Any = None,
+        params: Tuple = None,
     ):
         """
         state: particles from previous step
@@ -246,6 +263,9 @@ class IEDHFilter(AbstractFilter):
 
         particles_pred = particles_pred_clean + noise
 
+        internal_state = params.internal_state
+        internal_state_pred = self.internal_filter.predict(internal_state)
+
         """
         ================================================================
         Update step: homotopy flow and weigth update
@@ -254,10 +274,10 @@ class IEDHFilter(AbstractFilter):
         R = params.R if params is not None and hasattr(params, "R") else self.R
         assert R is not None, "Measurement noise covariance R must be provided."
 
-        P = self._compute_covariances(particles_pred)
+        P = internal_state_pred.cov
 
         I = jnp.eye(state.particles.shape[-1])  # match identity mat shape to state dim
-        eta_bar_0 = jnp.mean(particles_pred_clean, axis=0)
+        eta_bar_0 = jnp.mean(particles_pred_clean, axis=0)  # shape (state_dim,)
 
         """
         =========================
@@ -279,8 +299,9 @@ class IEDHFilter(AbstractFilter):
             # eta_bar = jnp.mean(particles, axis=0)
 
             # exponential steps over lambda, with q=1.2
-            lam = (1 - 1.2**step) / (1 - 1.2**self.flow_steps)
-            dlam = lam - (1 - 1.2 ** (step - 1)) / (1 - 1.2**self.flow_steps)
+            q = 1.2
+            lam = (1 - q**step) / (1 - q**self.flow_steps)
+            dlam = lam - (1 - q ** (step - 1)) / (1 - q**self.flow_steps)
 
             h_lam = self.h(eta_bar)
             H_lam = jax.jacfwd(self.h)(eta_bar)  # linearize h
@@ -311,7 +332,7 @@ class IEDHFilter(AbstractFilter):
 
         # Evaluate measurement function for all particles
         h_vmap = jax.vmap(self.h)
-        z_pred = h_vmap(state.particles)
+        z_pred = h_vmap(final_particles)
 
         ## Weight update
         # w_k -> prior * likelihood / proposal * w_(k-1)
@@ -330,10 +351,16 @@ class IEDHFilter(AbstractFilter):
         )
 
         log_prior = jax.scipy.stats.multivariate_normal.logpdf(
-            state.particles, mean=particles_pred_clean, cov=Q
+            final_particles, mean=particles_pred_clean, cov=Q
         )
 
-        log_weight = log_prior + log_likelihoods - log_proposal + jnp.log(jnp.maximum(state.weights, 1e-20)) # avoid log(0)
+        # Algo 2 line 21 - 24
+        log_weight = (
+            log_prior  # process distribution p(x_k | x_(k-1))
+            + log_likelihoods  # p(z_k | x_k)
+            - log_proposal  # p(eta_0 | x_(k-1))
+            + jnp.log(jnp.maximum(state.weights, 1e-20))  # w_(k-1)
+        )  # avoid log(0)
 
         weights = jnp.exp(log_weight - jnp.max(log_weight))
         # weights = jnp.exp(log_weight)
@@ -343,9 +370,194 @@ class IEDHFilter(AbstractFilter):
             particles=final_particles, weights=norm_weights, key=key
         )
 
-        return updated_state
+        # Algo 2 line 26
+        internal_state_update = self.internal_filter.update(internal_state_pred, z)
+        internal_state = GaussianState(
+            mean=updated_state.mean, cov=internal_state_update.cov
+        )
+        return updated_state, PFPFParam(internal_state)
 
-# class ILEDHFilter(AbstractFilter):
-#     def run_step(
-        
-#     )
+
+class ILEDHFilter(AbstractFilter):
+    """
+    Particle flow filter with invertible flow, built on Localized EDH.
+    Use invertible mapping property to perform efficient weight updates
+    see Li & Coates, Particle Filtering with Invertible Particle Flow
+    """
+
+    f: Callable
+    h: Callable
+    Q: Optional[jax.Array] = None
+    R: Optional[jax.Array] = None
+    internal_filter: AbstractFilter
+    num_particles: int = eqx.field(static=True)
+    flow_steps: int = eqx.field(static=True)
+
+    def __init__(
+        self,
+        f: Callable,
+        h: Callable,
+        internal_filter: AbstractFilter,
+        num_particles: int,
+        Q: Optional[jax.Array] = None,
+        R: Optional[jax.Array] = None,
+        flow_steps: int = 20,
+    ):
+        self.f = f
+        self.h = h
+        self.Q = jnp.asarray(Q) if Q is not None else None
+        self.R = jnp.asarray(R) if R is not None else None
+        self.num_particles = num_particles
+        self.flow_steps = flow_steps
+        self.internal_filter = internal_filter
+
+    @eqx.filter_jit
+    def run_step(
+        self,
+        state: ParticleState,
+        z: jax.Array,
+        u: Optional[jax.Array] = None,
+        params: PFPFParam = None,
+    ):
+        """
+        state: particles from previous step
+        z: measurement at current step
+        u: optional control signal, should be None for tracking
+        params: optional time varying parameters, should be none here
+        """
+
+        """
+        ================================================================
+        Prediction step: propagates particles through the dynamic model.
+        ================================================================
+        """
+        Q = params.Q if params is not None and hasattr(params, "Q") else self.Q
+        assert Q is not None, "Process noise covariance Q must be provided."
+
+        if u is not None and u.size > 0:
+            f_vmap = jax.vmap(lambda x: self.f(x, u))
+        else:
+            f_vmap = jax.vmap(self.f)
+
+        particles_pred_clean = f_vmap(state.particles)
+
+        state_dim = state.particles.shape[1]
+
+        key, subkey = jax.random.split(state.key)
+        noise = jax.random.multivariate_normal(
+            subkey, mean=jnp.zeros(state_dim), cov=Q, shape=(self.num_particles,)
+        )
+
+        particles_pred = particles_pred_clean + noise
+
+        # predict per particle covariance from internal filter
+        internal_state_pred = jax.vmap(self.internal_filter.predict)(params.internal_state)
+
+        eta_0 = particles_pred
+        eta_bar_0 = particles_pred_clean
+        """
+        ================================================================
+        Update step: homotopy flow and weigth update
+        ================================================================
+        """
+        R = params.R if params is not None and hasattr(params, "R") else self.R
+        assert R is not None, "Measurement noise covariance R must be provided."
+
+        # P = self._compute_covariances(particles_pred)
+        Ps = internal_state_pred.cov
+
+        I = jnp.eye(state.particles.shape[-1])  # match identity mat shape to state dim
+
+        """
+        =========================
+        invertibel flow
+        =========================
+        """
+
+        def flow_step(carry, step):
+            # [prop_with_noise, prop_no_noise, log_jac_det_sum]
+            eta, eta_bar, log_theta = carry
+
+            # exponential steps over lambda, with q=1.2
+            lam = (1 - 1.2**step) / (1 - 1.2**self.flow_steps)
+            dlam = lam - (1 - 1.2 ** (step - 1)) / (1 - 1.2**self.flow_steps)
+
+            def single_particle_flow(eta_i, eta_bar_i, eta_bar_0_i, Pi, log_theta_i):
+                h_lam = self.h(eta_bar_i)
+                H_lam = jax.jacfwd(self.h)(eta_bar_i)  # linearize h
+
+                S_lam = R + lam * (H_lam @ Pi @ H_lam.T)
+                A_lam = -1 / 2 * Pi @ H_lam.T @ jnp.linalg.solve(S_lam, H_lam)
+                e_lam = h_lam - H_lam @ eta_bar_i
+                b_lam = (I + 2 * lam * A_lam) @ (
+                    (I + lam * A_lam) @ Pi @ H_lam.T @ jnp.linalg.inv(R) @ (z - e_lam)
+                    + A_lam @ eta_bar_0_i
+                )
+
+                eta_bar_i_next = eta_bar_i + dlam * (A_lam @ eta_bar_i + b_lam)
+
+                eta_i_next = eta_i + dlam * (A_lam @ eta_i + b_lam)
+                log_theta_i_next = log_theta_i + jnp.log(
+                    jnp.abs(jnp.linalg.det(I + dlam * A_lam))
+                )
+                return eta_i_next, eta_bar_i_next, log_theta_i_next
+
+            eta_next, eta_bar_next, log_theta_next = jax.vmap(single_particle_flow)(
+                eta, eta_bar, eta_bar_0, Ps, log_theta
+            )
+
+            return (eta_next, eta_bar_next, log_theta_next), None
+
+        steps = jnp.arange(1, self.flow_steps)
+        log_thetas = jnp.zeros(self.num_particles)
+
+        (final_particles, _, final_log_thetas), _ = jax.lax.scan(
+            flow_step, (eta_0, eta_bar_0, log_thetas), steps
+        )
+
+        # Evaluate measurement function for all particles
+        h_vmap = jax.vmap(self.h)
+        z_pred = h_vmap(final_particles)
+
+        ## Weight update
+        # w_k -> prior * likelihood * theta / proposal * w_(k-1)
+        # log_w_k -> log_prior(process) + meas_log_likelihood - log_proposal + log_theta + log_w_(k-1)
+        log_likelihoods = jax.vmap(
+            lambda y: jax.scipy.stats.multivariate_normal.logpdf(
+                y, mean=jnp.zeros(R.shape[0]), cov=R
+            )
+        )(z_pred - z)
+
+        log_proposal = jax.scipy.stats.multivariate_normal.logpdf(
+            particles_pred, mean=state.particles, cov=Q
+        )
+
+        log_prior = jax.scipy.stats.multivariate_normal.logpdf(
+            final_particles, mean=state.particles, cov=Q
+        )
+
+        log_weight = (
+            log_prior
+            + log_likelihoods
+            - log_proposal
+            + final_log_thetas
+            + jnp.log(jnp.maximum(state.weights, 1e-20))
+        )  # avoid log(0)
+
+        weights = jnp.exp(log_weight - jnp.max(log_weight))
+        # weights = jnp.exp(log_weight)
+        norm_weights = weights / jnp.sum(weights)
+
+        updated_state = ParticleState(
+            particles=final_particles, weights=norm_weights, key=key
+        )
+
+        # Algo 1 line 28
+        internal_state_update = jax.vmap(
+            lambda s: self.internal_filter.update(state=s, y=z)
+        )(internal_state_pred)
+        internal_state = GaussianState(
+            mean=updated_state.particles, cov=internal_state_update.cov
+        )
+
+        return updated_state, PFPFParam(internal_state)

@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import equinox as eqx
 from typing import Callable, Optional, Any, Tuple
 
-from .base import AbstractFilter, State
+from .base import AbstractFilter
 
 
 class ParticleState(eqx.Module):
