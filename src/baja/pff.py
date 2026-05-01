@@ -5,7 +5,6 @@ from typing import Callable, Optional, Any, Tuple
 
 from .base import AbstractFilter, GaussianState
 from .pf import ParticleState
-from .ekf import ExtendedKalmanFilter
 from dataclasses import dataclass
 
 

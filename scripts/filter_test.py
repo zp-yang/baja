@@ -1,4 +1,4 @@
-from baja.sample_data import load_cubs_traj_data
+from baja.toy_problem import load_cubs_traj_data
 import numpy as np
 import matplotlib.pyplot as plt
 
