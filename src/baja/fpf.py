@@ -91,7 +91,7 @@ class FPF(AbstractFilter):
         # P = self._compute_covariances(particles_pred)
 
         # I = jnp.eye(state.particles.shape[-1])  # match identity mat shape to state dim
-
+        R_inv = jnp.linalg.inv(R)
         def flow_step(carry, step):
             """
             Constant gain approximation
@@ -103,6 +103,7 @@ class FPF(AbstractFilter):
             q = 1.2
             lam = (1 - q**step) / (1 - q**self.flow_steps)
             dlam = lam - (1 - q ** (step - 1)) / (1 - q**self.flow_steps)
+            # dlam = 1 / self.flow_steps
 
             # estimate h_hat
             h_vmap = jax.vmap(self.h)
@@ -110,26 +111,33 @@ class FPF(AbstractFilter):
 
             def calc_K(eta_i):
                 return eta_i[:, None] @ (self.h(eta_i) - h_hat)[None]
-            K = jnp.mean(jax.vmap(calc_K)(eta), axis=0)
+            K = jnp.mean(jax.vmap(calc_K)(eta), axis=0) @ R_inv
 
-            g_hat = jnp.dot(h_hat, h_hat) - jnp.mean(
-                jnp.sum(h_vmap(eta) * h_vmap(eta), axis=1)
-            )
-            eta_mean = jnp.mean(eta, axis=0)
-            def calc_Omega(eta_i):
+            # def calc_dh_square(z_pred_i):
+            #     return z_pred_i @ R_inv @ z_pred_i
+            # g_hat = h_hat @ R_inv @ h_hat - jnp.mean(jax.vmap(calc_dh_square)(h_vmap(eta)))
+            
+            # def calc_Omega(eta_i):
+            #     H = jax.jacfwd(self.h)(eta_i)
+            #     g = jnp.sum(K.T * H)
+            #     return eta_i * (g - g_hat)
+            
+            # Omega = jnp.mean(jax.vmap(calc_Omega)(eta), axis=0)
+            
+            def calc_g(eta_i):
                 H = jax.jacfwd(self.h)(eta_i)
-                g = jnp.sum(K.T * H)
-                return (eta_i - eta_mean) * (g - g_hat), (g - g_hat)
-            term1, term2 = jax.vmap(calc_Omega)(eta)
-            Omega = jnp.mean(term1, axis=0) + eta_mean * jnp.mean(term2, axis=0)
+                g_i = jnp.sum(K.T * H)
+                return g_i
+            g = jax.vmap(calc_g)(eta)
+            g_hat = jnp.mean(g)
+            Omega = jnp.mean(eta * (g - g_hat)[:, None], axis=0)
 
             def single_particle_flow(eta_i):
                 h_lam = self.h(eta_i)
                 inno_lam = z - 0.5 * (h_lam + h_hat)
 
-                # eta_i_next = eta_i + dlam * (K @ inno_lam + 0.5 * Omega)
-                
-                eta_i_next = eta_i + dlam * K @ inno_lam
+                eta_i_next = eta_i + dlam * (K @ inno_lam + 0.5 * Omega)
+                # eta_i_next = eta_i + dlam * K @ inno_lam
 
                 return eta_i_next
 

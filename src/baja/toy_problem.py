@@ -86,10 +86,10 @@ def get_toy_setup_params(sensor_type="br"):
     elif sensor_type == "b":  # azimuth and elevation
         sensor_pos = np.array(
             [
-                [20, 5, 10],
-                [20, -5, 10],
-                # [-5, 5, 10],
-                # [-5, -5, 10],
+                # [20, 5, 10],
+                # [20, -5, 10],
+                [-5, 5, 10],
+                [-5, -5, 10],
             ]
         )
         meas_dim = sensor_pos.shape[0] * 2
