@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import equinox as eqx
 from typing import Callable, Optional, Any, Tuple
 
-from .base import AbstractFilter, GaussianState
+from .base import AbstractFilter
 from .pf import ParticleState
 
 
@@ -75,9 +75,6 @@ class FPF(AbstractFilter):
 
         particles_pred = particles_pred_clean + noise
 
-        # predict per particle covariance from internal filter
-        # internal_state_pred = jax.vmap(self.internal_filter.predict)(params.internal_state)
-
         eta_0 = particles_pred
 
         """
@@ -107,29 +104,29 @@ class FPF(AbstractFilter):
 
             # estimate h_hat
             h_vmap = jax.vmap(self.h)
+            h_jac = jax.jacfwd(self.h)
             h_hat = jnp.mean(h_vmap(eta), axis=0)
 
+            # eta_bar = jnp.mean(eta, axis=0) # we use this because sum(h_i - h_hat) is not exactly zero, floating point 
             def calc_K(eta_i):
                 return eta_i[:, None] @ (self.h(eta_i) - h_hat)[None]
             K = jnp.mean(jax.vmap(calc_K)(eta), axis=0) @ R_inv
-
-            # def calc_dh_square(z_pred_i):
-            #     return z_pred_i @ R_inv @ z_pred_i
-            # g_hat = h_hat @ R_inv @ h_hat - jnp.mean(jax.vmap(calc_dh_square)(h_vmap(eta)))
-            
-            # def calc_Omega(eta_i):
-            #     H = jax.jacfwd(self.h)(eta_i)
-            #     g = jnp.sum(K.T * H)
-            #     return eta_i * (g - g_hat)
-            
-            # Omega = jnp.mean(jax.vmap(calc_Omega)(eta), axis=0)
             
             def calc_g(eta_i):
-                H = jax.jacfwd(self.h)(eta_i)
+                H = h_jac(eta_i)
                 g_i = jnp.sum(K.T * H)
                 return g_i
             g = jax.vmap(calc_g)(eta)
-            g_hat = jnp.mean(g)
+
+            ### g_hat via emprical mean, hack but works, stable flow
+            g_hat = jnp.mean(g) 
+
+            ### exact g_hat from paper assumes gaussian likelihood, 
+            ### claude said the sign is flipped, which seems true from my testing, 
+            ### this gives unstable flow, maybe due to R_inv?
+            # g_hat = h_hat @ R_inv @ h_hat - jnp.mean(jax.vmap(lambda y: y @ R_inv @ y)(h_vmap(eta)))
+            # g_hat = - g_hat
+
             Omega = jnp.mean(eta * (g - g_hat)[:, None], axis=0)
 
             def single_particle_flow(eta_i):
@@ -137,7 +134,7 @@ class FPF(AbstractFilter):
                 inno_lam = z - 0.5 * (h_lam + h_hat)
 
                 eta_i_next = eta_i + dlam * (K @ inno_lam + 0.5 * Omega)
-                # eta_i_next = eta_i + dlam * K @ inno_lam
+                # eta_i_next = eta_i + dlam * K @ inno_lam # flow works without Omega correction, so far ...
 
                 return eta_i_next
 

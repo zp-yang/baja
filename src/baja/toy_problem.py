@@ -18,8 +18,8 @@ def load_cubs_traj_data(resample_rule):
     return traj_data
 
 
-def dynamics_fn(states):
-    dt = 0.1  # because we resampled every 0.1s -> 10hz,
+def dynamics_fn(states, dt=0.1):
+    # dt = 0.1  # because we resampled every 0.1s -> 10hz,
     A = np.block(
         [[np.eye(3), dt * np.eye(3)], [np.zeros((3, 3)), np.eye(3)]]
     )  # simple LTI process model
@@ -69,6 +69,14 @@ def bearing_range_fn(states, sensor_pos):
     azims = jnp.atan2(b_vec[..., 1], b_vec[..., 0])
     return jnp.vstack([dist, azims, elevs]).T.flatten()
 
+def bearing_vec_fn(states, sensor_pos):
+    pos = states[:3]
+    b_vec = pos - sensor_pos
+
+    dist = jnp.linalg.norm(b_vec, axis=-1)
+    b_vec = b_vec / dist[:, None]
+    return b_vec
+
 
 def get_toy_setup_params(sensor_type="br"):
     if sensor_type == "r":
@@ -88,8 +96,8 @@ def get_toy_setup_params(sensor_type="br"):
             [
                 # [20, 5, 10],
                 # [20, -5, 10],
-                [-5, 5, 10],
-                [-5, -5, 10],
+                [-10, 5, 10],
+                [-10, -5, 10],
             ]
         )
         meas_dim = sensor_pos.shape[0] * 2
@@ -109,6 +117,20 @@ def get_toy_setup_params(sensor_type="br"):
         angular_res = np.deg2rad(2)
         R = np.diag([0.1**2, angular_res**2, angular_res**2])
         meas_fn = partial(bearing_range_fn, sensor_pos=sensor_pos)
+    
+    elif sensor_type == "bv": # bearing vector
+        sensor_pos = np.array(
+            [
+                # [20, 5, 10],
+                # [20, -5, 10],
+                [-5, 5, 10],
+                [-5, -5, 10],
+            ]
+        )
+        meas_dim = sensor_pos.shape[0] * 3
+        angular_res = np.deg2rad(2)
+        R = np.diag([0.1**2, angular_res**2, angular_res**2])
+        meas_fn = partial(bearing_vec_fn, sensor_pos=sensor_pos)
 
     Q = np.diag([1e-1, 1e-1, 1e-1, 0.5, 0.5, 0.5])
     return Q, R, meas_fn, sensor_pos
