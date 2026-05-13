@@ -30,6 +30,7 @@ from .ghkf import GaussHermiteKalmanFilter
 from .imm import IMMState, IMMFilter
 from .pff import EDHFilter
 from .pf import ParticleState, ParticleFilter
+from .smc_phd import SMCPHDState, SMCPHDFilter
 from .utils import lti_disc, rk4
 from .transforms import compute_ut_weights, generate_sigmas, unscented_transform
 
@@ -45,6 +46,8 @@ __all__ = [
     "IMMFilter",
     "ParticleState",
     "ParticleFilter",
+    "SMCPHDState",
+    "SMCPHDFilter",
     "EDHFilter",
     "lti_disc",
     "rk4",

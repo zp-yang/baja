@@ -18,12 +18,48 @@ def load_cubs_traj_data(resample_rule):
     return traj_data
 
 
-def dynamics_fn(states, dt=0.1):
+def dynamics_fn_CV(dt=0.1, sigma=1):
     # dt = 0.1  # because we resampled every 0.1s -> 10hz,
     A = np.block(
         [[np.eye(3), dt * np.eye(3)], [np.zeros((3, 3)), np.eye(3)]]
-    )  # simple LTI process model
-    return (A @ states.T).T
+    )  # constant velocity
+    # Q = np.diag([1e-1, 1e-1, 1e-1, 0.5, 0.5, 0.5])
+
+    Q = sigma * np.block(
+        [
+            [np.eye(3) * dt**3 / 3, np.eye(3) * dt**2 / 2],
+            [np.eye(3) * dt**2 / 2, np.eye(3) * dt],
+        ]
+    )
+
+    return lambda x: (A @ x.T).T, Q
+
+
+def dynamics_fn_CA(dt=0.1, sigma=5):
+    # dt = 0.1  # because we resampled every 0.1s -> 10hz,
+    A = np.block(
+        [
+            [np.eye(3), dt * np.eye(3), 0.5 * dt**2 * np.eye(3)],
+            [np.zeros((3, 3)), np.eye(3), dt * np.eye(3)],
+            [np.zeros((3, 6)), np.eye(3)],
+        ]
+    )  # constant acceleration
+    # Q = np.diag([1e-2, 1e-2, 1e-2, 0.5, 0.5, 0.5, 0.05, 0.05, 0.05])
+    Q = sigma * np.block(
+        [
+            [np.eye(3) * dt**5 / 20, np.eye(3) * dt**4 / 8, np.eye(3) * dt**3 / 6],
+            [np.eye(3) * dt**4 / 8, np.eye(3) * dt**3 / 3, np.eye(3) * dt**2 / 2],
+            [np.eye(3) * dt**3 / 6, np.eye(3) * dt**2 / 2, np.eye(3) * dt],
+        ]
+    )
+    return lambda x: (A @ x.T).T, Q
+
+
+def get_dynamics_params(dt=0.1, type="cv", sigma=1):
+    if type == "cv":
+        return dynamics_fn_CV(dt, sigma=sigma)
+    elif type == "ca":
+        return dynamics_fn_CA(dt, sigma=sigma)
 
 
 def dist_meas_fn(states, sensor_pos):
@@ -69,6 +105,7 @@ def bearing_range_fn(states, sensor_pos):
     azims = jnp.atan2(b_vec[..., 1], b_vec[..., 0])
     return jnp.vstack([dist, azims, elevs]).T.flatten()
 
+
 def bearing_vec_fn(states, sensor_pos):
     pos = states[:3]
     b_vec = pos - sensor_pos
@@ -78,7 +115,7 @@ def bearing_vec_fn(states, sensor_pos):
     return b_vec
 
 
-def get_toy_setup_params(sensor_type="br"):
+def get_toy_sensor_params(sensor_type="br"):
     if sensor_type == "r":
         sensor_pos = np.array(
             [
@@ -117,8 +154,8 @@ def get_toy_setup_params(sensor_type="br"):
         angular_res = np.deg2rad(2)
         R = np.diag([0.1**2, angular_res**2, angular_res**2])
         meas_fn = partial(bearing_range_fn, sensor_pos=sensor_pos)
-    
-    elif sensor_type == "bv": # bearing vector
+
+    elif sensor_type == "bv":  # bearing vector
         sensor_pos = np.array(
             [
                 # [20, 5, 10],
@@ -132,8 +169,8 @@ def get_toy_setup_params(sensor_type="br"):
         R = np.diag([0.1**2, angular_res**2, angular_res**2])
         meas_fn = partial(bearing_vec_fn, sensor_pos=sensor_pos)
 
-    Q = np.diag([1e-1, 1e-1, 1e-1, 0.5, 0.5, 0.5])
-    return Q, R, meas_fn, sensor_pos
+    # Q = np.diag([1e-1, 1e-1, 1e-1, 0.5, 0.5, 0.5])
+    return R, meas_fn, sensor_pos
 
 
 def log_measurement(sensor_type, meas_noisy, sensor_pos):

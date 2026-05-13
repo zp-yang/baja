@@ -119,13 +119,13 @@ class FPF(AbstractFilter):
             g = jax.vmap(calc_g)(eta)
 
             ### g_hat via emprical mean, hack but works, stable flow
-            g_hat = jnp.mean(g) 
+            # g_hat = jnp.mean(g) 
 
             ### exact g_hat from paper assumes gaussian likelihood, 
-            ### claude said the sign is flipped, which seems true from my testing, 
-            ### this gives unstable flow, maybe due to R_inv?
-            # g_hat = h_hat @ R_inv @ h_hat - jnp.mean(jax.vmap(lambda y: y @ R_inv @ y)(h_vmap(eta)))
-            # g_hat = - g_hat
+            ### claude said the sign is flipped, which seems true from my testing and derivation, 
+            ### this gives unstable flow at single precsion, double precision is also worse than emprical mean, why???
+            g_hat = h_hat @ R_inv @ h_hat - jnp.mean(jax.vmap(lambda y: y @ R_inv @ y)(h_vmap(eta)))
+            g_hat = - g_hat
 
             Omega = jnp.mean(eta * (g - g_hat)[:, None], axis=0)
 
